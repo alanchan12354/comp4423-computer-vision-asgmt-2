@@ -39,28 +39,42 @@ def main() -> None:
     st.set_page_config(page_title="Leaf Classifier", page_icon="🌿")
     st.title("Leaf Image Classifier")
 
-    st.write("Upload an image and run inference with the trained model.")
+    st.write("Upload one or more images and run inference with the trained model.")
 
     model_path = st.text_input("Model path", value=str(DEFAULT_MODEL_PATH))
     label_encoder_path = st.text_input("Label encoder path", value=str(DEFAULT_LABEL_ENCODER_PATH))
 
-    uploaded_file = st.file_uploader(
-        "Choose an image",
+    uploaded_files = st.file_uploader(
+        "Choose image(s)",
         type=["jpg", "jpeg", "png", "bmp", "webp"],
+        accept_multiple_files=True,
     )
 
-    if uploaded_file is None:
-        st.info("Please upload an image to continue.")
+    if not uploaded_files:
+        st.info("Please upload one or more images to continue.")
         return
 
-    try:
-        image_bgr = decode_uploaded_image(uploaded_file)
-    except Exception as exc:
-        st.error(f"Could not read image: {exc}")
+    decoded_images: list[tuple[str, np.ndarray]] = []
+    decode_errors: list[str] = []
+    for uploaded_file in uploaded_files:
+        try:
+            image_bgr = decode_uploaded_image(uploaded_file)
+            decoded_images.append((uploaded_file.name, image_bgr))
+        except Exception as exc:
+            decode_errors.append(f"{uploaded_file.name}: {exc}")
+
+    if decode_errors:
+        st.error("Some files could not be read:")
+        for error in decode_errors:
+            st.write(f"- {error}")
+
+    if not decoded_images:
         return
 
-    preview_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
-    st.image(preview_rgb, caption="Image preview", use_container_width=True)
+    st.write("Image previews:")
+    for filename, image_bgr in decoded_images:
+        preview_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
+        st.image(preview_rgb, caption=filename, use_container_width=True)
 
     if st.button("Predict", type="primary"):
         model_file = Path(model_path)
@@ -75,29 +89,38 @@ def main() -> None:
 
         try:
             model, label_encoder = load_artifacts(str(model_file), str(encoder_file))
-            feature_vector = extract_feature_vector(image_bgr)
-            x = feature_vector.reshape(1, -1).astype(np.float32)
+            features = [extract_feature_vector(image_bgr) for _, image_bgr in decoded_images]
+            x = np.vstack(features).astype(np.float32)
 
-            pred_enc = model.predict(x)[0]
-            pred_label = label_encoder.inverse_transform(np.asarray([pred_enc], dtype=int))[0]
-            st.success(f"Predicted class: {pred_label}")
+            pred_encs = model.predict(x)
+            pred_labels = label_encoder.inverse_transform(np.asarray(pred_encs, dtype=int))
+
+            results = []
+            for (filename, _), pred_label in zip(decoded_images, pred_labels):
+                results.append({"filename": filename, "predicted_class": pred_label})
+
+            st.success("Predictions completed.")
+            st.write("Predicted classes:")
+            st.table(results)
 
             if hasattr(model, "predict_proba"):
-                probabilities = model.predict_proba(x)[0]
+                probabilities_batch = model.predict_proba(x)
 
                 if hasattr(model, "classes_"):
                     enc_classes = np.asarray(model.classes_, dtype=int)
                 else:
-                    enc_classes = np.arange(len(probabilities), dtype=int)
+                    enc_classes = np.arange(probabilities_batch.shape[1], dtype=int)
 
                 class_labels = label_encoder.inverse_transform(enc_classes)
-                class_prob_pairs = list(zip(class_labels, probabilities))
-                class_prob_pairs.sort(key=lambda item: item[1], reverse=True)
+                st.write("Top-3 probabilities per image:")
+                for (filename, _), probabilities in zip(decoded_images, probabilities_batch):
+                    class_prob_pairs = list(zip(class_labels, probabilities))
+                    class_prob_pairs.sort(key=lambda item: item[1], reverse=True)
+                    top_3 = class_prob_pairs[:3]
 
-                top_3 = class_prob_pairs[:3]
-                st.write("Top-3 probabilities:")
-                for class_name, prob in top_3:
-                    st.write(f"- **{class_name}**: {prob:.4f}")
+                    st.write(f"**{filename}**")
+                    for class_name, prob in top_3:
+                        st.write(f"- **{class_name}**: {prob:.4f}")
             else:
                 st.info("Model does not support predict_proba.")
 
