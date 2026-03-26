@@ -232,5 +232,6 @@ Generative AI was used as a coding assistant for:
 ## 9. Conclusion
 This assignment demonstrates a full classical CV + ML workflow for campus vegetation recognition, from collection planning to deployable local inference. The chosen handcrafted feature fusion with Random Forest achieved strong validation performance and perfect current split test results. Future work should focus on larger datasets and harder distribution shifts for stronger generalization evidence.
 
-## 10. Appendix: streamlit app results
+## 10. Appendix: Results
+![alt text](outputs/confusion_matrix.png)
 ![alt text](screencapture-localhost-8501-2026-03-26-16_28_59.png)
